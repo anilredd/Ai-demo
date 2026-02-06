@@ -1,0 +1,87 @@
+stages:
+  - build
+  - ai_review
+  - docker_build
+  - docker_scan
+
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "main"'
+
+# =========================
+# 1) JAVA BUILD ✅
+# =========================
+build:
+  stage: build
+  image: maven:3.9.5-eclipse-temurin-17
+  script:
+    - echo "Running Maven Build..."
+    - mvn clean package
+  artifacts:
+    paths:
+      - target/
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "main"'
+
+# =========================
+# 2) AI CODE REVIEW (GEMINI) ✅
+# =========================
+ai_review:
+  stage: ai_review
+  image: python:3.11
+  variables:
+    PIP_USER: "0"
+  needs:
+    - build
+  script:
+    - python3 -m pip install --upgrade google-genai --no-cache-dir
+    - python3 ai_code_review_gemini.py | tee ai_review_output.txt
+  artifacts:
+    paths:
+      - ai_review_output.txt
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "main"'
+
+# =========================
+# 3) DOCKER IMAGE BUILD ✅
+# =========================
+docker_build:
+  stage: docker_build
+  image: docker:20.10
+  services:
+    - docker:dind
+  needs:
+    - build
+    - ai_review
+  dependencies:
+    - build
+  script:
+    - echo "Listing artifacts received from build stage..."
+    - ls -l target/
+
+    - echo "Building Docker Image..."
+    - docker build -t ai-demo:latest .
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "main"'
+
+# =========================
+# 4) TRIVY + AI IMAGE SCAN ✅
+# =========================
+docker_scan:
+  stage: docker_scan
+  image: docker:20.10
+  services:
+    - docker:dind
+  needs:
+    - docker_build
+  script:
+    - apk add --no-cache python3 py3-pip
+    - pip install trivy google-genai
+    - trivy image ai-demo:latest --severity HIGH,CRITICAL -f json -o scan.json
+    - python3 ai_docker_review.py | tee docker_scan_output.txt
+  artifacts:
+    paths:
+      - scan.json
+      - docker_scan_output.txt
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "main"'

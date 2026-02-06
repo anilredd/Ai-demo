@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  ai-demo-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-demo:latest
+    container_name: ai-demo-app
+    environment:
+      - APP_PASSWORD=${APP_PASSWORD}
+    restart: unless-stopped
