@@ -1,90 +1,166 @@
-stages:
-  - build
-  - ai_review
-  - docker_build
-  - docker_scan
+name: CI-CD with AI + Docker + ECR
 
-workflow:
-  rules:
-    - if: '$CI_COMMIT_BRANCH != "main"'
+on:
+  push:
+    branches:
+      - 'feature/**'      # runs only on feature branches
 
-# =========================
-# 1) JAVA BUILD ✅
-# =========================
-build:
-  stage: build
-  image: maven:3.9.5-eclipse-temurin-17
-  script:
-    - echo "Running Maven Build..."
-    - mvn clean package
-  artifacts:
-    paths:
-      - target/
-  rules:
-    - if: '$CI_COMMIT_BRANCH != "main"'
+env:
+  AWS_REGION: us-east-2
+  ECR_REGISTRY: 018092638984.dkr.ecr.us-east-2.amazonaws.com
+  ECR_REPO: aidemorepo
+  IMAGE_TAG: ${{ github.sha }}
 
-# =========================
-# 2) AI CODE REVIEW (GEMINI) ✅
-# =========================
-ai_review:
-  stage: ai_review
-  image: python:3.11
-  variables:
-    PIP_USER: "0"
-  needs:
-    - build
-  script:
-    - python3 -m pip install --upgrade google-genai --no-cache-dir
-    - python3 ai_code_review_gemini.py | tee ai_review_output.txt
-  artifacts:
-    paths:
-      - ai_review_output.txt
-  rules:
-    - if: '$CI_COMMIT_BRANCH != "main"'
+jobs:
 
-# =========================
-# 3) DOCKER IMAGE BUILD ✅
-# =========================
-docker_build:
-  stage: docker_build
-  image: docker:20.10
-  services:
-    - docker:dind
-  needs:
-    - build
-    - ai_review
-  dependencies:
-    - build
-  script:
-    - echo "Listing artifacts received from build stage..."
-    - ls -l target/
+  # =========================
+  # 1️⃣ JAVA BUILD
+  # =========================
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - echo "Building Docker Image..."
-    - docker build -t ai-demo:latest .
-  rules:
-    - if: '$CI_COMMIT_BRANCH != "main"'
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-# =========================
-# 4) TRIVY + AI IMAGE SCAN ✅
-# =========================
-docker_scan:
-  stage: docker_scan
-  image: docker:20.10
-  services:
-    - docker:dind
-  needs:
-    - docker_build
-  script:
-    - apk add --no-cache python3 py3-pip
-    - pip install trivy google-genai
-    - trivy image ai-demo:latest --severity HIGH,CRITICAL -f json -o scan.json
-    - python3 ai_docker_review.py | tee docker_scan_output.txt
-  artifacts:
-    paths:
-      - scan.json
-      - docker_scan_output.txt
-  rules:
-    - if: '$CI_COMMIT_BRANCH != "main"'
+      - name: Maven Build
+        run: mvn clean package
 
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: target/
 
-   ## 
+  # =========================
+  # 2️⃣ AI CODE REVIEW (GEMINI)
+  # =========================
+  ai_code_review:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+          path: target/
+
+      - name: Install Python deps
+        run: pip install google-genai
+
+      - name: Run AI Code Review
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python3 ai_code_review_gemini.py | tee ai_review_output.txt
+
+      - name: Upload AI review output
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-review
+          path: ai_review_output.txt
+
+  # =========================
+  # 3️⃣ DOCKER BUILD
+  # =========================
+  docker_build:
+    runs-on: ubuntu-latest
+    needs: ai_code_review
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+          path: target/
+
+      - name: Build Docker image
+        run: |
+          docker build -t $ECR_REPO:$IMAGE_TAG .
+
+      - name: Save image
+        run: docker save $ECR_REPO:$IMAGE_TAG -o image.tar
+
+      - name: Upload Docker image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: image.tar
+
+  # =========================
+  # 4️⃣ AI + TRIVY IMAGE SCAN
+  # =========================
+  docker_scan:
+    runs-on: ubuntu-latest
+    needs: docker_build
+    steps:
+      - name: Download Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: .
+
+      - name: Load Docker image
+        run: docker load -i image.tar
+
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget
+          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.45.1_Linux-64bit.deb
+          sudo dpkg -i trivy_0.45.1_Linux-64bit.deb
+
+      - name: Run Trivy Scan
+        run: |
+          trivy image $ECR_REPO:$IMAGE_TAG \
+            --severity HIGH,CRITICAL \
+            -f json -o scan.json
+
+      - name: Upload scan report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-scan
+          path: scan.json
+
+  # =========================
+  # 5️⃣ PUSH TO AWS ECR
+  # =========================
+  push_ecr:
+    runs-on: ubuntu-latest
+    needs: docker_scan
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION \
+            | docker login --username AWS --password-stdin $ECR_REGISTRY
+
+      - name: Download Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: .
+
+      - name: Load image
+        run: docker load -i image.tar
+
+      - name: Tag and push to ECR
+        run: |
+          docker tag $ECR_REPO:$IMAGE_TAG \
+            $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
