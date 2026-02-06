@@ -99,7 +99,7 @@ jobs:
   # =========================
   # 4️⃣ AI + TRIVY IMAGE SCAN
   # =========================
-    docker_scan:
+  docker_scan:
     runs-on: ubuntu-latest
     needs: docker_build
     steps:
@@ -128,4 +128,3 @@ jobs:
         with:
           name: trivy-scan
           path: scan.json
-
