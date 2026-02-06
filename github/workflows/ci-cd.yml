@@ -85,3 +85,6 @@ docker_scan:
       - docker_scan_output.txt
   rules:
     - if: '$CI_COMMIT_BRANCH != "main"'
+
+
+   ## 
