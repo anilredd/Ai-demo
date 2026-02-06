@@ -22,7 +22,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Maven Build
+      - name: Maven Builda
         run: mvn clean package
 
       - name: Upload JAR artifact
@@ -63,30 +63,34 @@ jobs:
   # =========================
   # 3️⃣ DOCKER BUILD
   # =========================
-  docker_build:
-    runs-on: ubuntu-latest
-    needs: ai_code_review
-    steps:
-      - uses: actions/checkout@v4
+ docker_build:
+  runs-on: ubuntu-latest
+  needs: ai_code_review
 
-      - name: Download JAR artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: app-jar
-          path: target/
+  env:
+    AWS_REGION: us-east-2
+    ECR_REGISTRY: 018092638984.dkr.ecr.us-east-2.amazonaws.com
+    ECR_REPO: aidemorepo
+    IMAGE_TAG: ${{ github.sha }}   # <-- IMPORTANT FIX
 
-      - name: Build Docker image
-        run: |
-          docker build -t $ECR_REPO:$IMAGE_TAG .
+  steps:
+    - uses: actions/checkout@v4
 
-      - name: Save image
-        run: docker save $ECR_REPO:$IMAGE_TAG -o image.tar
+    - name: Download JAR artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: app-jar
+        path: target/
 
-      - name: Upload Docker image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image
-          path: image.tar
+    - name: Debug variables (safety check)
+      run: |
+        echo "ECR_REPO=$ECR_REPO"
+        echo "IMAGE_TAG=$IMAGE_TAG"
+
+    - name: Build Docker image
+      run: |
+        docker build -t "$ECR_REPO:$IMAGE_TAG" .
+
 
   # =========================
   # 4️⃣ AI + TRIVY IMAGE SCAN
