@@ -99,7 +99,7 @@ jobs:
   # =========================
   # 4️⃣ AI + TRIVY IMAGE SCAN
   # =========================
-  docker_scan:
+    docker_scan:
     runs-on: ubuntu-latest
     needs: docker_build
     steps:
@@ -112,12 +112,10 @@ jobs:
       - name: Load Docker image
         run: docker load -i image.tar
 
-      - name: Install Trivy (correct version)
+      - name: Install Trivy (official method)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wget
-          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.49.1_Linux-64bit.deb
-          sudo dpkg -i trivy_0.49.1_Linux-64bit.deb
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
+          trivy --version
 
       - name: Run Trivy Scan
         run: |
@@ -130,3 +128,4 @@ jobs:
         with:
           name: trivy-scan
           path: scan.json
+
