@@ -1,11 +1,13 @@
-name: CI-CD with AI + Docker + ECR
+name: CI — Build + AI Review + Docker + AI Image Scan
 
 on:
   push:
     branches:
-      - 'feature/**'      # runs only on feature branches
+      - 'feature/**'
 
-
+env:
+  IMAGE_NAME: ai-demo
+  IMAGE_TAG: ${{ github.sha }}
 
 jobs:
 
@@ -15,8 +17,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v3
@@ -77,12 +78,17 @@ jobs:
           name: app-jar
           path: target/
 
+      - name: Debug image variables
+        run: |
+          echo "IMAGE_NAME=$IMAGE_NAME"
+          echo "IMAGE_TAG=$IMAGE_TAG"
+
       - name: Build Docker image
         run: |
-          docker build -t $ECR_REPO:$IMAGE_TAG .
+          docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
 
-      - name: Save image
-        run: docker save $ECR_REPO:$IMAGE_TAG -o image.tar
+      - name: Save Docker image
+        run: docker save ${IMAGE_NAME}:${IMAGE_TAG} -o image.tar
 
       - name: Upload Docker image artifact
         uses: actions/upload-artifact@v4
@@ -106,18 +112,16 @@ jobs:
       - name: Load Docker image
         run: docker load -i image.tar
 
-      - name: Install Trivy (FIXED METHOD)
+      - name: Install Trivy (correct version)
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install -y trivy
+          sudo apt-get install -y wget
+          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.49.1_Linux-64bit.deb
+          sudo dpkg -i trivy_0.49.1_Linux-64bit.deb
 
       - name: Run Trivy Scan
         run: |
-          trivy image $ECR_REPO:$IMAGE_TAG \
+          trivy image ${IMAGE_NAME}:${IMAGE_TAG} \
             --severity HIGH,CRITICAL \
             -f json -o scan.json
 
@@ -126,5 +130,3 @@ jobs:
         with:
           name: trivy-scan
           path: scan.json
-
- 
