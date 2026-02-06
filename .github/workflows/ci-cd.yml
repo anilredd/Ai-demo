@@ -5,11 +5,7 @@ on:
     branches:
       - 'feature/**'      # runs only on feature branches
 
-env:
-  AWS_REGION: us-east-2
-  ECR_REGISTRY: 018092638984.dkr.ecr.us-east-2.amazonaws.com
-  ECR_REPO: aidemorepo
-  IMAGE_TAG: ${{ github.sha }}
+
 
 jobs:
 
@@ -131,38 +127,4 @@ jobs:
           name: trivy-scan
           path: scan.json
 
-  # =========================
-  # 5️⃣ PUSH TO AWS ECR
-  # =========================
-  push_ecr:
-    runs-on: ubuntu-latest
-    needs: docker_scan
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to ECR
-        run: |
-          aws ecr get-login-password --region $AWS_REGION \
-            | docker login --username AWS --password-stdin $ECR_REGISTRY
-
-      - name: Download Docker image
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-image
-          path: .
-
-      - name: Load image
-        run: docker load -i image.tar
-
-      - name: Tag and push to ECR
-        run: |
-          docker tag $ECR_REPO:$IMAGE_TAG \
-            $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+ 
